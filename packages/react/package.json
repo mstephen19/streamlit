@@ -1,0 +1,18 @@
+{
+    "name": "streamlit-react",
+    "version": "1.0.0",
+    "main": "dist/index.js",
+    "license": "MIT",
+    "type": "module",
+    "scripts": {
+        "build": "tsc"
+    },
+    "devDependencies": {
+        "@repo/tsconfig": "*",
+        "@types/react": "^19.0.2",
+        "streamlit-client": "*"
+    },
+    "dependencies": {
+        "react": "^19.0.0"
+    }
+}
