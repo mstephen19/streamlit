@@ -18,11 +18,11 @@ const client = pubSubClient<{
 
 const test = client.namespace('messages').key('test');
 
-const subscriber = test.subscribe({ withCredentials: true });
+const subscriber = test.subscribe();
 
 subscriber.onError(() => {
     console.log('Error occurred');
-    subscriber.unsubscribe();
+    // subscriber.unsubscribe();
 });
 
 subscriber.onConnect(() => {
@@ -30,6 +30,8 @@ subscriber.onConnect(() => {
 });
 
 subscriber.on('testmessage', (data) => console.log(data));
+
+subscriber.on('testmessage2', (data) => console.log(data));
 
 const [button, button2] = document.querySelectorAll('button');
 

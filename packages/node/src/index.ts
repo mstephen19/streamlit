@@ -13,6 +13,8 @@ type EventInfo = {
     data: string;
 };
 
+const INITIAL_EVENT_NAME = '__init__';
+
 // Sends a server-sent-event to the client
 export type EventBrokerClient = (event: EventInfo) => void;
 
@@ -258,8 +260,10 @@ const pubSub = ({
 
             res.writeHead(200);
             // Flush
-            res.write('');
+            res.write(`id:\nevent:${INITIAL_EVENT_NAME}\ndata:\nretry:${reconnectionTimeMilliseconds}\n\n`);
 
+            // todo: create an event batch at the key-level instead of each client having its own batch
+            // ? Reduces memory usage & ensures all clients are sent events at the same time
             const batch = eventBatch(maxBatchSize, maxBatchLifespanMilliseconds, reconnectionTimeMilliseconds, res);
 
             const unsubscribe = await eventBroker.subscribe(namespaceName, keyName, (event) => batch.add(event));
@@ -300,8 +304,8 @@ const pubSub = ({
                 return;
             }
 
-            if (event.event === '*') {
-                jsonError(Fault.Client, 'Cannot send an event using wildcard name.', 400)(res);
+            if (event.event === '*' || event.event === INITIAL_EVENT_NAME) {
+                jsonError(Fault.Client, 'Forbidden event name.', 404)(res);
                 return;
             }
 
@@ -313,7 +317,7 @@ const pubSub = ({
 
             const validateFn = eventDefinition.validateData;
             if (validateFn && !validateFn(event.data)) {
-                jsonError(Fault.Client, 'Invalid event data.', 400)(res);
+                jsonError(Fault.Client, 'Invalid event data.', 406)(res);
                 return;
             }
 
@@ -377,6 +381,9 @@ const pubSub = ({
                 default:
                     jsonError(Fault.Client, 'Unsupported request method. Supported methods are GET and POST.', 400)(res);
                     break;
+                case 'OPTIONS':
+                    res.writeHead(204);
+                    res.end();
                 case 'GET':
                     handleGet(namespaceName, keyName, req, res);
                     break;

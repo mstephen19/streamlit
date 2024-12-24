@@ -3,6 +3,7 @@ type Awaitable<T> = T | Promise<T>;
 export type PubSubClientConfig = {
     baseUrl: string;
     path: string;
+    credentials?: RequestCredentials;
 };
 
 export type NamespaceEventTypeMap = {
@@ -23,12 +24,17 @@ export type Subscriber<EventTypeUnion = string> = {
     unsubscribe: () => void;
 };
 
-export type Publisher<EventTypeUnion = string> = (eventName: EventTypeUnion, data: string) => Promise<void>;
-
 const subscriber =
-    <EventTypeUnion = string>(url: URL) =>
-    (options?: EventSourceInit): Subscriber<EventTypeUnion> => {
-        const eventSource = new EventSource(url, options);
+    <EventTypeUnion = string>(url: URL, credentials: RequestCredentials) =>
+    (query?: Record<string, string>): Subscriber<EventTypeUnion> => {
+        const finalUrl = new URL(url);
+        if (query) {
+            for (const key in query) finalUrl.searchParams.set(key, query![key]!);
+        }
+
+        const eventSource = new EventSource(finalUrl, {
+            withCredentials: credentials !== 'omit',
+        });
 
         return {
             get connected() {
@@ -51,8 +57,10 @@ const subscriber =
         };
     };
 
+export type Publisher<EventTypeUnion = string> = (eventName: EventTypeUnion, data: string) => Promise<void>;
+
 const publisher =
-    <EventTypeUnion = string>(url: URL): Publisher<EventTypeUnion> =>
+    <EventTypeUnion = string>(url: URL, credentials: RequestCredentials): Publisher<EventTypeUnion> =>
     async (eventName: EventTypeUnion, data: string) => {
         const res = await fetch(url, {
             method: 'POST',
@@ -60,13 +68,14 @@ const publisher =
                 event: eventName,
                 data,
             }),
+            credentials,
         });
 
         if (res.status !== 202) throw new Error('Failed to send event.');
     };
 
 const namespace =
-    <EventTypeMap = NamespaceEventTypeMap>(baseUrl: string, path: string) =>
+    <EventTypeMap = NamespaceEventTypeMap>(baseUrl: string, path: string, credentials: RequestCredentials) =>
     <K extends keyof EventTypeMap>(namespaceName: K) => ({
         key: (keyName: string) => {
             const url = new URL(path, baseUrl);
@@ -74,16 +83,16 @@ const namespace =
             url.searchParams.set('key', keyName);
 
             return {
-                subscribe: subscriber<EventTypeMap[K]>(url),
-                publish: publisher<EventTypeMap[K]>(url),
+                subscribe: subscriber<EventTypeMap[K]>(url, credentials),
+                publish: publisher<EventTypeMap[K]>(url, credentials),
             };
         },
     });
 
-export const pubSubClient = <EventTypeMap = NamespaceEventTypeMap>({ baseUrl, path }: PubSubClientConfig) => {
+export const pubSubClient = <EventTypeMap = NamespaceEventTypeMap>({ baseUrl, path, credentials = 'omit' }: PubSubClientConfig) => {
     if (!baseUrl) throw new Error('Must provide a base URL.');
 
     return {
-        namespace: namespace<EventTypeMap>(baseUrl, path),
+        namespace: namespace<EventTypeMap>(baseUrl, path, credentials),
     };
 };

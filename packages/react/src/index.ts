@@ -1,5 +1,5 @@
 import { pubSubClient, type PubSubClientConfig, type NamespaceEventTypeMap, type Subscriber } from 'streamlit-client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -26,7 +26,7 @@ export const pubSubHooks = <EventTypeMap extends NamespaceEventTypeMap = Namespa
     const usePublish = <K extends keyof EventTypeMap>({ namespace, key }: KeyspaceInfo<EventTypeMap, K>) => {
         const keyspace = useKeyspace(namespace, key);
 
-        return useMemo(() => keyspace.publish, [keyspace]);
+        return keyspace.publish;
     };
 
     const useSubscribe = <K extends keyof EventTypeMap>({
@@ -34,11 +34,11 @@ export const pubSubHooks = <EventTypeMap extends NamespaceEventTypeMap = Namespa
         key,
         eventName,
         eventHandler,
-        withCredentials = false,
+        query,
     }: KeyspaceInfo<EventTypeMap, K> & {
         eventName: EventTypeMap[K];
         eventHandler: (data: string) => Awaitable<void>;
-        withCredentials?: boolean;
+        query?: Record<string, string>;
     }) => {
         const [connected, setConnected] = useState(() => {
             return Boolean(subscriberCache[namespace]?.[key]?.subscriber?.connected);
@@ -46,14 +46,22 @@ export const pubSubHooks = <EventTypeMap extends NamespaceEventTypeMap = Namespa
         const [error, setError] = useState(false);
         const keyspace = useKeyspace(namespace, key);
 
+        const eventHandlerRef = useRef(eventHandler);
+
+        useEffect(() => {
+            eventHandlerRef.current = eventHandler;
+        }, [eventHandler]);
+
         useEffect(() => {
             setConnected(Boolean(subscriberCache[namespace]?.[key]?.subscriber?.connected));
             setError(false);
 
+            // todo: Fix cache - doesn't account for subscriptions with different query params
+            // ! Will hit, even if query params are different
             // Create & cache a subscriber if not already present
             subscriberCache[namespace] ??= {};
             subscriberCache[namespace][key] ??= {
-                subscriber: keyspace.subscribe({ withCredentials }),
+                subscriber: keyspace.subscribe(query),
                 count: 0,
             };
 
@@ -62,9 +70,14 @@ export const pubSubHooks = <EventTypeMap extends NamespaceEventTypeMap = Namespa
             const subscriber = subscriberCache[namespace][key].subscriber;
 
             subscriber.onError(() => setError(true));
-            subscriber.onConnect(() => setConnected(true));
+            subscriber.onConnect(() => {
+                setConnected(true);
+                setError(false);
+            });
 
-            const removeListener = subscriber.on(eventName, eventHandler);
+            const removeListener = subscriber.on(eventName, (data: string) => {
+                eventHandlerRef.current(data);
+            });
 
             return () => {
                 removeListener();
@@ -81,7 +94,7 @@ export const pubSubHooks = <EventTypeMap extends NamespaceEventTypeMap = Namespa
 
                 subscriberCache[namespace][key].count--;
             };
-        }, [keyspace, eventName, eventHandler, withCredentials]);
+        }, [keyspace, eventName, query]);
 
         return {
             connected,

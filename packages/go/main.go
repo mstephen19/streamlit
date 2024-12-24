@@ -39,6 +39,8 @@ func randomId() string {
 	return id
 }
 
+const initialEventName = "__init__"
+
 type fault string
 
 const (
@@ -293,11 +295,14 @@ func (broker *InMemoryEventBroker) Publish(namespaceName, keyName string, event 
 	keyClientMap.mutex.RLock()
 	clientMap, ok := keyClientMap.data[keyName]
 	keyClientMap.mutex.RUnlock()
-	if !ok || len(clientMap.data) == 0 {
+	if !ok {
 		return
 	}
 
 	clientMap.mutex.RLock()
+	if len(clientMap.data) == 0 {
+		return
+	}
 	defer clientMap.mutex.RUnlock()
 
 	// Send the message to all clients
@@ -442,7 +447,7 @@ func (broker *RedisEventBroker) Publish(namespaceName, keyName string, event *Ev
 	broker.pubClient.Publish(context.Background(), broker.GetChannelName(namespaceName, keyName), rawEvent)
 }
 
-// A pub-sub provider based on server-sent-events & your chosen event broker (e.g. Redis, AWS SNS, Apache Kafka).
+// A pub-sub provider based on server-sent-events & your chosen event broker (e.g. Redis, Apache Kafka).
 //
 // Allows for bi-directional communication between the client & server, in addition to client-to-client communication.
 //
@@ -491,6 +496,7 @@ func NewPubSub(config PubSubConfig) *PubSub {
 		eventBroker:      config.EventBroker,
 		maxBatchSize:     config.MaxBatchSize,
 		maxBatchLifespan: config.MaxBatchLifespan,
+		reconnectionTime: config.ReconnectionTime,
 	}
 
 	pubSub.eventBroker.Initialize()
@@ -557,10 +563,17 @@ func (pubSub *PubSub) handleGet(namespaceName, keyName string, w ResponseWriterF
 
 	w.WriteHeader(http.StatusOK)
 
+	initialEvent := Event{
+		Event: initialEventName,
+	}
+
+	w.Write([]byte(initialEvent.toString(pubSub.reconnectionTime)))
 	w.Flush()
 
 	subscriber := pubSub.eventBroker.Subscribe(namespaceName, keyName)
 
+	// todo: create an event batch at the key-level instead of each client having its own batch
+	// ? Reduces memory usage & ensures all clients are sent events at the same time
 	batch := make(eventBatch, 0, pubSub.maxBatchSize)
 	ticker := time.NewTicker(pubSub.maxBatchLifespan)
 
@@ -632,8 +645,8 @@ func (pubSub *PubSub) handlePost(namespaceName, keyName string, w http.ResponseW
 		return
 	}
 
-	if event.Event == "*" {
-		newJsonError().client().message("Cannot send an event using wildcard name.").status(http.StatusBadRequest).send(w)
+	if event.Event == "*" || event.Event == initialEventName {
+		newJsonError().client().message("Forbidden event name.").status(http.StatusNotAcceptable).send(w)
 		return
 
 	}
@@ -685,6 +698,11 @@ func (pubSub *PubSub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		{
 			newJsonError().client().message("Unsupported request method. Supported methods are GET and POST.").status(http.StatusBadRequest).send(w)
+			break
+		}
+	case http.MethodOptions:
+		{
+			w.WriteHeader(http.StatusNoContent)
 			break
 		}
 	case http.MethodGet:

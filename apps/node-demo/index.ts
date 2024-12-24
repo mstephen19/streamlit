@@ -16,7 +16,9 @@ const pubSubApp = pubSub({
 
 const testNamespace = pubSubApp.namespace('messages');
 
-testNamespace.allowEventType('message');
+testNamespace.allowEventType('testmessage');
+
+testNamespace.allowEventType('testmessage2');
 
 const server = createServer(
     {
@@ -27,6 +29,12 @@ const server = createServer(
         // For demo purposes only
         res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
         res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+        if (req.method === 'OPTIONS') {
+            res.writeHead(204);
+            res.end();
+            return;
+        }
 
         pubSubApp.handler(req, res);
     }
