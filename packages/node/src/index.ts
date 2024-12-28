@@ -13,6 +13,9 @@ type EventInfo = {
     data: string;
 };
 
+const eventToString = (event: EventInfo, reconnectionTimeMilliseconds: number) =>
+    `id:${event.id}\nevent:${event.event}\ndata:${event.data}\nretry:${reconnectionTimeMilliseconds}\n\n`;
+
 const INITIAL_EVENT_NAME = '__init__';
 
 // Sends a server-sent-event to the client
@@ -168,7 +171,7 @@ const eventBatch = (
         res.write(
             batch
                 .splice(0, maxBatchSize)
-                .map((event) => `id:${event.id}\nevent:${event.event}\ndata:${event.data}\nretry:${reconnectionTimeMilliseconds}\n\n`)
+                .map((event) => eventToString(event, reconnectionTimeMilliseconds))
                 .join('')
         );
 
@@ -233,8 +236,8 @@ const jsonError = (fault: Fault, message: string, statusCode: number) => (res: S
 const pubSub = ({
     eventBroker = inMemoryEventBroker(),
     reconnectionTimeMilliseconds = 3_000,
-    maxBatchSize = 5,
-    maxBatchLifespanMilliseconds = 100,
+    maxBatchSize = 0,
+    maxBatchLifespanMilliseconds = 0,
 }: PubSubOptions) => {
     const namespaces: {
         [namespaceName: string]: NamespaceDefinition;
@@ -262,16 +265,20 @@ const pubSub = ({
             // Flush
             res.write(`id:\nevent:${INITIAL_EVENT_NAME}\ndata:\nretry:${reconnectionTimeMilliseconds}\n\n`);
 
-            // todo: create an event batch at the key-level instead of each client having its own batch
-            // ? Reduces memory usage & ensures all clients are sent events at the same time
-            const batch = eventBatch(maxBatchSize, maxBatchLifespanMilliseconds, reconnectionTimeMilliseconds, res);
+            const shouldBatch = maxBatchLifespanMilliseconds > 0 && reconnectionTimeMilliseconds > 0;
 
-            const unsubscribe = await eventBroker.subscribe(namespaceName, keyName, (event) => batch.add(event));
+            const batch = shouldBatch ? eventBatch(maxBatchSize, maxBatchLifespanMilliseconds, reconnectionTimeMilliseconds, res) : null;
+
+            const unsubscribe = await eventBroker.subscribe(
+                namespaceName,
+                keyName,
+                batch ? (event) => batch.add(event) : (event) => res.write(eventToString(event, reconnectionTimeMilliseconds))
+            );
 
             req.once('close', () => {
                 res.end();
                 unsubscribe();
-                batch.close();
+                batch?.close();
             });
         } catch (err) {
             jsonError(Fault.Server, 'Internal server error.', 500)(res);

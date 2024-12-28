@@ -479,14 +479,6 @@ func NewPubSub(config PubSubConfig) *PubSub {
 		config.EventBroker = &InMemoryEventBroker{}
 	}
 
-	if config.MaxBatchSize == 0 {
-		config.MaxBatchSize = 5
-	}
-
-	if config.MaxBatchLifespan == 0 {
-		config.MaxBatchLifespan = time.Millisecond * 100
-	}
-
 	if config.ReconnectionTime == 0 {
 		config.ReconnectionTime = time.Second * 3
 	}
@@ -571,22 +563,28 @@ func (pubSub *PubSub) handleGet(namespaceName, keyName string, w ResponseWriterF
 	w.Flush()
 
 	subscriber := pubSub.eventBroker.Subscribe(namespaceName, keyName)
+	defer subscriber.Unsubscribe()
 
-	// todo: create an event batch at the key-level instead of each client having its own batch
-	// ? Reduces memory usage & ensures all clients are sent events at the same time
-	batch := make(eventBatch, 0, pubSub.maxBatchSize)
-	ticker := time.NewTicker(pubSub.maxBatchLifespan)
+	shouldBatch := pubSub.maxBatchLifespan > 0 && pubSub.maxBatchSize > 0
 
-	sendBatch := func() {
-		w.Write([]byte(batch.toString(pubSub.reconnectionTime)))
-		batch = batch[:0]
-		w.Flush()
+	var batch eventBatch
+	var tickerChannel <-chan time.Time
+	var sendBatch func()
+
+	if shouldBatch {
+		batch = make(eventBatch, 0, pubSub.maxBatchSize)
+
+		ticker := time.NewTicker(pubSub.maxBatchLifespan)
+		defer ticker.Stop()
+
+		tickerChannel = ticker.C
+
+		sendBatch = func() {
+			w.Write([]byte(batch.toString(pubSub.reconnectionTime)))
+			batch = batch[:0]
+			w.Flush()
+		}
 	}
-
-	defer func() {
-		subscriber.Unsubscribe()
-		ticker.Stop()
-	}()
 
 	// Blocks until the request closes
 stream:
@@ -596,6 +594,15 @@ stream:
 		case <-r.Context().Done():
 			break stream
 		case event, ok := <-subscriber.Channel():
+			if !shouldBatch {
+				if ok && event != nil {
+					w.Write([]byte(event.toString(pubSub.reconnectionTime)))
+					w.Flush()
+				}
+
+				break
+			}
+
 			if ok && event != nil {
 				batch = append(batch, event)
 			}
@@ -605,7 +612,7 @@ stream:
 				sendBatch()
 			}
 		// Once the buffer time is reached, flush all events regardless of batch size
-		case <-ticker.C:
+		case <-tickerChannel:
 			if len(batch) > 0 {
 				sendBatch()
 			}

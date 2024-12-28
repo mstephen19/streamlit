@@ -8,8 +8,12 @@
         "demo": "node --loader ts-node/esm ./index.ts"
     },
     "devDependencies": {
-        "ts-node": "^10.9.2",
+        "@repo/tsconfig": "*",
+        "@types/express": "^5.0.0",
+        "@types/spdy": "^3.4.9",
+        "express": "^4.21.2",
+        "spdy": "^4.0.2",
         "streamlit-node": "*",
-        "@repo/tsconfig": "*"
+        "ts-node": "^10.9.2"
     }
 }
