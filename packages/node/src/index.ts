@@ -206,13 +206,15 @@ type NamespaceAuthConfig = {
     authorizeSubscriber?: (keyName: string, req: IncomingMessage) => Awaitable<boolean>;
 };
 
+type EventDefinition = {
+    validateData?: (eventData: string) => boolean;
+    enrichData?: (eventData: string, req: IncomingMessage) => string;
+    captureEvent?: (event: EventInfo, req: IncomingMessage) => Awaitable<void>;
+};
+
 type NamespaceDefinition = {
     events: {
-        [keyName: string]: {
-            validateData?: (eventData: string) => boolean;
-            enrichData?: (eventData: string, req: IncomingMessage) => string;
-            captureEvent?: (event: EventInfo, req: IncomingMessage) => Awaitable<void>;
-        };
+        [keyName: string]: EventDefinition;
     };
     auth: NamespaceAuthConfig;
 };
@@ -356,13 +358,7 @@ const pubSub = ({
             };
 
             return {
-                allowEventType: (
-                    eventName: string,
-                    options: {
-                        validateData?: (eventData: string) => boolean;
-                        enrichData?: (eventData: string, req: IncomingMessage) => string;
-                    } = {}
-                ) => {
+                allowEventType: (eventName: string, options: EventDefinition = {}) => {
                     namespaces[namespaceName]!.events[eventName] = options;
                 },
                 configureAuth: (auth: NamespaceAuthConfig) => {

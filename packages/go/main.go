@@ -156,10 +156,19 @@ type namespaceEventDefinition struct {
 	captureEvent          func(event *Event, r *http.Request)
 }
 
-// Prevent an event from being forwarded to all clients subscribed in the keyspace, and instead handle the
+// Prevent an event type from being forwarded to all clients subscribed in the keyspace, and instead handle the
 // event on the server
 func (eventDefinition *namespaceEventDefinition) Capture(captureEvent func(event *Event, r *http.Request)) {
 	eventDefinition.captureEvent = captureEvent
+}
+
+// Validate event data (e.g. preventing empty strings from being sent) with a validator function, passed as the second argument.
+// Passing nil skips event data validation.
+//
+// The validator function can also optionally modify the event data by including a non-empty string as its second return value.
+// Pass an empty string ("") to skip enriching and maintain the original event data.
+func (eventDefinition *namespaceEventDefinition) Validate(validateAndEnrichData func(data string, r *http.Request) (bool, string)) {
+	eventDefinition.validateAndEnrichData = validateAndEnrichData
 }
 
 // Key: Event Type
@@ -177,21 +186,13 @@ type namespaceDefinition struct {
 
 // Add to the list of events allowed to be published from the client-side.
 //
-// Validate event data (e.g. preventing empty strings from being sent) with a validator function, passed as the second argument.
-// Passing nil skips event data validation.
-//
-// The validator function can also optionally modify the event data by including a non-empty string as its second return value.
-// Pass an empty string ("") to skip enriching and maintain the original event data.
-//
 // Only the event types you specify are allowed to be sent on the namespace, unless a type of "*" is specified
-func (definition namespaceDefinition) AllowEventType(eventType string, validateAndEnrichData func(data string, r *http.Request) (bool, string)) *namespaceEventDefinition {
+func (definition namespaceDefinition) AllowEventType(eventType string) *namespaceEventDefinition {
 	eventDefinition, ok := definition.namespaceEventMap[eventType]
 	if !ok {
 		eventDefinition = &namespaceEventDefinition{}
 		definition.namespaceEventMap[eventType] = eventDefinition
 	}
-
-	eventDefinition.validateAndEnrichData = validateAndEnrichData
 
 	return eventDefinition
 }

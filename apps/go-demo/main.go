@@ -76,7 +76,7 @@ func main() {
 	// Allow "message" events to be sent front the client, as long as they contain
 	// a non-empty "content" property.
 	// Add the sender's nickname to the message data
-	chats.AllowEventType("message", func(data string, r *http.Request) (bool, string) {
+	chats.AllowEventType("message").Validate(func(data string, r *http.Request) (bool, string) {
 		message := &Message{}
 		json.Unmarshal([]byte(data), message)
 

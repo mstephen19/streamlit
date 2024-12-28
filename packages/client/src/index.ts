@@ -61,6 +61,14 @@ const subscriber =
             onConnect: (handler: () => Awaitable<void>) => {
                 eventSource.onopen = () => handler();
             },
+            /**
+             * Listen for events expected to be received on the key.
+             *
+             * @example
+             * subscriber.on('event_name', (eventData) => {
+             *     console.log(eventData);
+             * });
+             */
             on: (eventName: EventTypeUnion, handler: (data: string) => Awaitable<void>) => {
                 const listener = ({ data }: MessageEvent<string>) => handler(data);
 
@@ -104,7 +112,23 @@ const namespace =
             url.searchParams.set('key', keyName);
 
             return {
+                /**
+                 * Listen for events on the given key.
+                 *
+                 * @example
+                 * const subscriber = keyspace.subscribe();
+                 *
+                 * subscriber.on('event_name', (eventData) => {
+                 *     console.log(eventData);
+                 * });
+                 */
                 subscribe: subscriber<EventTypeMap[K]>(url, credentials),
+                /**
+                 * Publish events to the server on the given key.
+                 *
+                 * @example
+                 * keyspace.publish('event_name', 'event_data');
+                 */
                 publish: publisher<EventTypeMap[K]>(url, credentials),
             };
         },
@@ -128,17 +152,26 @@ const namespace =
  *
  * const weatherData = notifications.key('weather-data');
  *
+ * // Subscribing to events
  * const subscriber = weatherData.subscribe();
- * subscriber.on('update', (data) => {
- *     console.log(data);
+ *
+ * subscriber.on('update', (eventData) => {
+ *     console.log(eventData);
  * });
  *
- * const userEvents = client.namespace('')
+ * // Publishing events
+ * const userEvents = notifications.key('user-events');
+ *
+ * userEvents.publish('event', 'Hello');
  */
 export const pubSubClient = <EventTypeMap = NamespaceEventTypeMap>({ baseUrl, path, credentials = 'omit' }: PubSubClientConfig) => {
     if (!baseUrl) throw new Error('Must provide a base URL.');
 
     return {
+        /**
+         * **Namespaces** are logical separations of channels, each allowing a certain set of event types.
+         * An example of a **namespace** name could be "main", "chatrooms", or "notifications".
+         */
         namespace: namespace<EventTypeMap>(baseUrl, path, credentials),
     };
 };
