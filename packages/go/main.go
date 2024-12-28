@@ -568,13 +568,14 @@ func (pubSub *PubSub) handleGet(namespaceName, keyName string, w ResponseWriterF
 	shouldBatch := pubSub.maxBatchLifespan > 0 && pubSub.maxBatchSize > 0
 
 	var batch eventBatch
+	var ticker *time.Ticker
 	var tickerChannel <-chan time.Time
 	var sendBatch func()
 
 	if shouldBatch {
 		batch = make(eventBatch, 0, pubSub.maxBatchSize)
 
-		ticker := time.NewTicker(pubSub.maxBatchLifespan)
+		ticker = time.NewTicker(pubSub.maxBatchLifespan)
 		defer ticker.Stop()
 
 		tickerChannel = ticker.C
@@ -605,6 +606,11 @@ stream:
 
 			if ok && event != nil {
 				batch = append(batch, event)
+
+				// If the batch is one event long, it's new and lifespan is reset
+				if len(batch) == 1 {
+					ticker.Reset(pubSub.maxBatchLifespan)
+				}
 			}
 
 			// Once the buffer max size is reached, flush all events regardless of time
