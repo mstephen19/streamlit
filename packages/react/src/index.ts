@@ -8,6 +8,12 @@ type KeyspaceInfo<EventTypeMap, K extends keyof EventTypeMap> = {
     key: string;
 };
 
+const getSubscriberCacheKey = (key: string, query: Record<string, string> = {}) => {
+    const params = new URLSearchParams(Object.entries(query).sort(([a], [b]) => a.localeCompare(b))).toString();
+
+    return `${key}?${params}`;
+};
+
 export const pubSubHooks = <EventTypeMap extends NamespaceEventTypeMap = NamespaceEventTypeMap>(clientConfig: PubSubClientConfig) => {
     const subscriberCache: {
         [K in keyof EventTypeMap]?: {
@@ -53,21 +59,23 @@ export const pubSubHooks = <EventTypeMap extends NamespaceEventTypeMap = Namespa
         }, [eventHandler]);
 
         useEffect(() => {
-            setConnected(Boolean(subscriberCache[namespace]?.[key]?.subscriber?.connected));
+            // Ensure cache accounts for query parameters as well
+            // Different query parameters = different cache entry
+            const cacheKey = getSubscriberCacheKey(key, query);
+
+            setConnected(Boolean(subscriberCache[namespace]?.[cacheKey]?.subscriber?.connected));
             setError(false);
 
-            // todo: Fix cache - doesn't account for subscriptions with different query params
-            // ! Will hit, even if query params are different
             // Create & cache a subscriber if not already present
             subscriberCache[namespace] ??= {};
-            subscriberCache[namespace][key] ??= {
+            subscriberCache[namespace][cacheKey] ??= {
                 subscriber: keyspace.subscribe(query),
                 count: 0,
             };
 
-            subscriberCache[namespace][key].count++;
+            subscriberCache[namespace][cacheKey].count++;
 
-            const subscriber = subscriberCache[namespace][key].subscriber;
+            const subscriber = subscriberCache[namespace][cacheKey].subscriber;
 
             subscriber.onError(() => setError(true));
             subscriber.onConnect(() => {
@@ -82,17 +90,17 @@ export const pubSubHooks = <EventTypeMap extends NamespaceEventTypeMap = Namespa
             return () => {
                 removeListener();
 
-                if (!subscriberCache[namespace]?.[key]) return;
+                if (!subscriberCache[namespace]?.[cacheKey]) return;
 
                 // If this component is the last one using the subscriber, disconnect
-                if (subscriberCache[namespace][key].count === 1) {
-                    subscriberCache[namespace][key].subscriber.unsubscribe();
+                if (subscriberCache[namespace][cacheKey].count === 1) {
+                    subscriberCache[namespace][cacheKey].subscriber.unsubscribe();
 
-                    delete subscriberCache[namespace][key];
+                    delete subscriberCache[namespace][cacheKey];
                     return;
                 }
 
-                subscriberCache[namespace][key].count--;
+                subscriberCache[namespace][cacheKey].count--;
             };
         }, [keyspace, eventName, query]);
 
