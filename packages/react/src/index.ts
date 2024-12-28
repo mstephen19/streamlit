@@ -1,5 +1,5 @@
 import { pubSubClient, type PubSubClientConfig, type NamespaceEventTypeMap, type Subscriber } from 'streamlit-client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type Awaitable<T> = T | Promise<T>;
 

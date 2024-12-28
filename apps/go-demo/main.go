@@ -101,6 +101,27 @@ func main() {
 		return true, string(enrichedMessage)
 	})
 
+	message := &Message{
+		Sender:  "Server",
+		Content: "Test",
+	}
+
+	messageData, _ := json.Marshal(message)
+
+	dummyEvent := &streamlit.Event{
+		Id:    "123123123123",
+		Event: "message",
+		Data:  string(messageData),
+	}
+
+	ticker := time.NewTicker(time.Millisecond * 50)
+
+	go func() {
+		for range ticker.C {
+			pubSub.Publish("chats", "room1", dummyEvent)
+		}
+	}()
+
 	serveMux := &http.ServeMux{}
 
 	serveMux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {

@@ -145,16 +145,20 @@ type namespaceEventDefinition struct {
 
 // Prevent an event type from being forwarded to all clients subscribed in the keyspace, and instead handle the
 // event on the server.
-func (eventDefinition *namespaceEventDefinition) Capture(captureEvent func(event *Event, r *http.Request)) {
+func (eventDefinition *namespaceEventDefinition) Capture(captureEvent func(event *Event, r *http.Request)) *namespaceEventDefinition {
 	eventDefinition.captureEvent = captureEvent
+
+	return eventDefinition
 }
 
 // Validate event data (e.g. preventing empty strings from being sent).
 //
 // The validator function can also optionally modify the event data by including a non-empty string as its second return value.
 // Pass an empty string ("") to skip enriching and maintain the original event data.
-func (eventDefinition *namespaceEventDefinition) Validate(validateAndEnrichData func(data string, r *http.Request) (bool, string)) {
+func (eventDefinition *namespaceEventDefinition) Validate(validateAndEnrichData func(data string, r *http.Request) (bool, string)) *namespaceEventDefinition {
 	eventDefinition.validateAndEnrichData = validateAndEnrichData
+
+	return eventDefinition
 }
 
 // Key: Event Type
