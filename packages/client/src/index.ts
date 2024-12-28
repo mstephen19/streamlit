@@ -1,5 +1,23 @@
 type Awaitable<T> = T | Promise<T>;
 
+enum QueryParam {
+    Namespace = 'namespace',
+    Key = 'key',
+}
+
+const RESERVED_QUERY_PARAMETERS: string[] = Object.values(QueryParam);
+
+const getFinalUrl = (url: URL, query?: Record<string, string>) => {
+    if (!query) return url;
+
+    const reservedParameter = Object.keys(query).find((key) => RESERVED_QUERY_PARAMETERS.includes(key));
+    if (reservedParameter) throw new Error(`${reservedParameter} is a reserved parameter.`);
+
+    const finalUrl = new URL(url);
+    for (const key in query) finalUrl.searchParams.set(key, query[key]!);
+    return finalUrl;
+};
+
 export type PubSubClientConfig = {
     baseUrl: string;
     path: string;
@@ -27,10 +45,7 @@ export type Subscriber<EventTypeUnion = string> = {
 const subscriber =
     <EventTypeUnion = string>(url: URL, credentials: RequestCredentials) =>
     (query?: Record<string, string>): Subscriber<EventTypeUnion> => {
-        const finalUrl = new URL(url);
-        if (query) {
-            for (const key in query) finalUrl.searchParams.set(key, query![key]!);
-        }
+        const finalUrl = getFinalUrl(url, query);
 
         const eventSource = new EventSource(finalUrl, {
             withCredentials: credentials !== 'omit',
@@ -57,12 +72,14 @@ const subscriber =
         };
     };
 
-export type Publisher<EventTypeUnion = string> = (eventName: EventTypeUnion, data: string) => Promise<void>;
+export type Publisher<EventTypeUnion = string> = (eventName: EventTypeUnion, data: string, query?: Record<string, string>) => Promise<void>;
 
 const publisher =
     <EventTypeUnion = string>(url: URL, credentials: RequestCredentials): Publisher<EventTypeUnion> =>
-    async (eventName: EventTypeUnion, data: string) => {
-        const res = await fetch(url, {
+    async (eventName: EventTypeUnion, data: string, query?: Record<string, string>) => {
+        const finalUrl = getFinalUrl(url, query);
+
+        const res = await fetch(finalUrl, {
             method: 'POST',
             body: JSON.stringify({
                 event: eventName,
@@ -77,6 +94,10 @@ const publisher =
 const namespace =
     <EventTypeMap = NamespaceEventTypeMap>(baseUrl: string, path: string, credentials: RequestCredentials) =>
     <K extends keyof EventTypeMap>(namespaceName: K) => ({
+        /**
+         * **Keys** are identifiers for channels within a namespace. When subscribed to a key, a client will receive all events sent on that key.
+         * An example of a **key** name could be "chatroom-49230582", or "user-23490982-notifs"
+         */
         key: (keyName: string) => {
             const url = new URL(path, baseUrl);
             url.searchParams.set('namespace', namespaceName as string);
@@ -89,6 +110,31 @@ const namespace =
         },
     });
 
+/**
+ * Initialize a client to integrate with a Streamlit server.
+ *
+ * Provides an interface for subscribing to & publishing events on **namespace** channels, also called **keys**.
+ *
+ * **Namespaces** are logical separations of channels, each allowing a certain set of event types.
+ * An example of a **namespace** name could be "main", "chatrooms", or "notifications".
+ *
+ * **Keys** are identifiers for channels within a namespace. When subscribed to a key, a client will receive all events sent on that key.
+ * An example of a **key** name could be "chatroom-49230582", or "user-23490982-notifs"
+ *
+ * @example
+ * const client = pubSubClient({ baseUrl: 'https://localhost:8000', path: '/events' });
+ *
+ * const notifications = client.namespace('notifications');
+ *
+ * const weatherData = notifications.key('weather-data');
+ *
+ * const subscriber = weatherData.subscribe();
+ * subscriber.on('update', (data) => {
+ *     console.log(data);
+ * });
+ *
+ * const userEvents = client.namespace('')
+ */
 export const pubSubClient = <EventTypeMap = NamespaceEventTypeMap>({ baseUrl, path, credentials = 'omit' }: PubSubClientConfig) => {
     if (!baseUrl) throw new Error('Must provide a base URL.');
 

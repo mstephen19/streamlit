@@ -9,11 +9,11 @@
     },
     "devDependencies": {
         "@repo/tsconfig": "*",
-        "@types/node": "^22.10.1"
+        "@types/node": "^22.10.1",
+        "tiny-typed-emitter": "^2.1.0"
     },
     "dependencies": {
         "nanoid": "^5.0.9",
-        "redis": "^4.7.0",
-        "tiny-typed-emitter": "^2.1.0"
+        "redis": "^4.7.0"
     }
 }

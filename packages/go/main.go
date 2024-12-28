@@ -151,15 +151,29 @@ func (auth *NamespaceAuth) AuthorizeSubscriber(validateSubscriber func(keyName s
 	auth.validateSubscriber = validateSubscriber
 }
 
+type namespaceEventDefinition struct {
+	validateAndEnrichData func(data string, r *http.Request) (bool, string)
+	captureEvent          func(event *Event, r *http.Request)
+}
+
+// Prevent an event from being forwarded to all clients subscribed in the keyspace, and instead handle the
+// event on the server
+func (eventDefinition *namespaceEventDefinition) Capture(captureEvent func(event *Event, r *http.Request)) {
+	eventDefinition.captureEvent = captureEvent
+}
+
 // Key: Event Type
 //
 // Value: Function that validates & enriched event data
-type namespaceEventMap map[string]func(data string, r *http.Request) (bool, string)
+type namespaceEventMap map[string]*namespaceEventDefinition
 
 type namespaceDefinition struct {
 	namespaceEventMap
 	auth *NamespaceAuth
 }
+
+// todo: Allow sending events just to the server, not passing to other clients
+// todo: Allow onSubscribe and onUnsubscribe handlers
 
 // Add to the list of events allowed to be published from the client-side.
 //
@@ -170,8 +184,16 @@ type namespaceDefinition struct {
 // Pass an empty string ("") to skip enriching and maintain the original event data.
 //
 // Only the event types you specify are allowed to be sent on the namespace, unless a type of "*" is specified
-func (definition namespaceDefinition) AllowEventType(eventType string, validateAndEnrichData func(data string, r *http.Request) (bool, string)) {
-	definition.namespaceEventMap[eventType] = validateAndEnrichData
+func (definition namespaceDefinition) AllowEventType(eventType string, validateAndEnrichData func(data string, r *http.Request) (bool, string)) *namespaceEventDefinition {
+	eventDefinition, ok := definition.namespaceEventMap[eventType]
+	if !ok {
+		eventDefinition = &namespaceEventDefinition{}
+		definition.namespaceEventMap[eventType] = eventDefinition
+	}
+
+	eventDefinition.validateAndEnrichData = validateAndEnrichData
+
+	return eventDefinition
 }
 
 func (definition *namespaceDefinition) ConfigureAuth(auth *NamespaceAuth) {
@@ -665,18 +687,18 @@ func (pubSub *PubSub) handlePost(namespaceName, keyName string, w http.ResponseW
 	}
 
 	// Ensure the event type is valid
-	validateAndEnrichData, ok := pubSub.namespaceMap[namespaceName].namespaceEventMap[event.Event]
+	eventDefinition, ok := pubSub.namespaceMap[namespaceName].namespaceEventMap[event.Event]
 	if !ok {
 		// Allow all events to flow through if "*" is registered as an event type
-		validateAndEnrichData, ok = pubSub.namespaceMap[namespaceName].namespaceEventMap["*"]
+		eventDefinition, ok = pubSub.namespaceMap[namespaceName].namespaceEventMap["*"]
 		if !ok {
 			newJsonError().client().message(fmt.Sprintf("\"%s\" is not a valid event type on \"%s\".", event.Event, namespaceName)).status(http.StatusBadRequest).send(w)
 			return
 		}
 	}
 
-	if validateAndEnrichData != nil {
-		dataIsValid, enrichedData := validateAndEnrichData(event.Data, r)
+	if eventDefinition.validateAndEnrichData != nil {
+		dataIsValid, enrichedData := eventDefinition.validateAndEnrichData(event.Data, r)
 		if !dataIsValid {
 			newJsonError().client().message("Invalid event data.").status(http.StatusBadRequest).send(w)
 			return
@@ -689,7 +711,11 @@ func (pubSub *PubSub) handlePost(namespaceName, keyName string, w http.ResponseW
 
 	event.Id = randomId()
 
-	go pubSub.eventBroker.Publish(namespaceName, keyName, event)
+	if eventDefinition.captureEvent != nil {
+		go eventDefinition.captureEvent(event, r)
+	} else {
+		go pubSub.eventBroker.Publish(namespaceName, keyName, event)
+	}
 
 	w.WriteHeader(http.StatusAccepted)
 }

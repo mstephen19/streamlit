@@ -1,9 +1,10 @@
-import { TypedEmitter } from 'tiny-typed-emitter';
+import EventEmitter from 'events';
 import { nanoid } from 'nanoid';
 import { createClient, RedisClientType, type RedisClientOptions } from 'redis';
 import assert from 'assert';
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import type { TypedEmitter } from 'tiny-typed-emitter';
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -52,7 +53,9 @@ export const inMemoryEventBroker = (): EventBroker => {
 
     const subscribe = (namespaceName: string, keyName: string, client: EventBrokerClient) => {
         namespaceMap[namespaceName] ??= {
-            eventEmitter: new TypedEmitter(),
+            eventEmitter: new EventEmitter() as TypedEmitter<{
+                [keyName: string]: (event: EventInfo) => void;
+            }>,
             keyClientMap: {},
         };
 
@@ -208,6 +211,7 @@ type NamespaceDefinition = {
         [keyName: string]: {
             validateData?: (eventData: string) => boolean;
             enrichData?: (eventData: string, req: IncomingMessage) => string;
+            captureEvent?: (event: EventInfo, req: IncomingMessage) => Awaitable<void>;
         };
     };
     auth: NamespaceAuthConfig;
@@ -333,7 +337,9 @@ const pubSub = ({
 
             event.id = nanoid();
 
-            await eventBroker.publish(namespaceName, keyName, event);
+            const captureEvent = eventDefinition.captureEvent;
+            if (captureEvent) captureEvent(event, req);
+            else eventBroker.publish(namespaceName, keyName, event);
 
             res.writeHead(202);
             res.end();
