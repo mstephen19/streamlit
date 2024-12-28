@@ -237,14 +237,14 @@ export type NamespaceAuthConfig = {
 };
 
 type EventDefinition = {
+    // todo: Combine validateData & enrichData - return false? Assume invalid. Else, assume returned data is enriched event
     /**
-     * Validate event data (e.g. preventing empty strings from being sent).
+     * Validate event data (e.g. preventing empty strings from being sent). Return `false` if invalid, otherwise return
+     * the original event data.
+     *
+     * Optionally modify the event data by enriching it & returning a new string, which will be used as the event data.
      */
-    validateData?: (eventData: string) => boolean;
-    /**
-     * Modify the event data before it is either forwarded to other clients, or captured (if `captureEvent()` is present).
-     */
-    enrichData?: (eventData: string, req: IncomingMessage) => string;
+    validateData?: (eventData: string, req: IncomingMessage) => string | false;
     /**
      * Prevent an event type from being forwarded to all clients subscribed in the keyspace, and instead handle the event on the server.
      */
@@ -377,13 +377,16 @@ const pubSub = ({
             }
 
             const validateFn = eventDefinition.validateData;
-            if (validateFn && !validateFn(event.data)) {
+            const validatedData = validateFn ? validateFn(event.data, req) : true;
+
+            if (validatedData === false) {
                 jsonError(Fault.Client, 'Invalid event data.', 406)(res);
                 return;
             }
 
-            const enrichData = eventDefinition.enrichData;
-            if (enrichData) event.data = enrichData(event.data, req);
+            if (typeof validatedData === 'string' && validatedData !== event.data) {
+                event.data = validatedData;
+            }
 
             event.id = nanoid();
 

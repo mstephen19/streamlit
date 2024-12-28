@@ -9,11 +9,14 @@
     },
     "devDependencies": {
         "@repo/tsconfig": "*",
+        "@types/cookie": "^1.0.0",
         "@types/express": "^5.0.0",
         "@types/spdy": "^3.4.9",
         "express": "^4.21.2",
         "spdy": "^4.0.2",
         "streamlit-node": "*",
-        "ts-node": "^10.9.2"
-    }
+        "ts-node": "^10.9.2",
+        "cookie": "^1.0.2"
+    },
+    "dependencies": {}
 }
