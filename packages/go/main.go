@@ -164,11 +164,18 @@ type namespaceEventMap map[string]*namespaceEventDefinition
 
 type namespaceDefinition struct {
 	namespaceEventMap
-	auth *NamespaceAuth
+	auth          *NamespaceAuth
+	onSubscribe   func(r *http.Request)
+	onUnsubscribe func(r *http.Request)
 }
 
-// todo: Allow sending events just to the server, not passing to other clients
-// todo: Allow onSubscribe and onUnsubscribe handlers
+func (definition *namespaceDefinition) OnSubscribe(onSubscribe func(r *http.Request)) {
+	definition.onSubscribe = onSubscribe
+}
+
+func (definition *namespaceDefinition) OnUnsubscribe(onUnsubscribe func(r *http.Request)) {
+	definition.onUnsubscribe = onUnsubscribe
+}
 
 // Add to the list of events allowed to be published from the client-side.
 //
@@ -531,7 +538,9 @@ func (pubSub *PubSub) Publish(namespaceName, keyName string, event *Event) {
 }
 
 func (pubSub *PubSub) handleGet(namespaceName, keyName string, w responseWriterFlusher, r *http.Request) {
-	authProvider := pubSub.namespaceMap[namespaceName].auth
+	definition := pubSub.namespaceMap[namespaceName]
+
+	authProvider := definition.auth
 
 	if authProvider != nil {
 		// Authorize subscriber
@@ -566,6 +575,16 @@ func (pubSub *PubSub) handleGet(namespaceName, keyName string, w responseWriterF
 	w.Header().Set("Connection", "keep-alive")
 
 	w.WriteHeader(http.StatusOK)
+
+	onSubscribe := definition.onSubscribe
+	if onSubscribe != nil {
+		go onSubscribe(r)
+	}
+
+	onUnsubscribe := definition.onUnsubscribe
+	if onUnsubscribe != nil {
+		defer onSubscribe(r)
+	}
 
 	initialEvent := Event{
 		Event: initialEventName,

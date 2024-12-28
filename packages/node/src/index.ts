@@ -256,7 +256,10 @@ type NamespaceDefinition = {
         [keyName: string]: EventDefinition;
     };
     auth: NamespaceAuthConfig;
-};
+} & TypedEmitter<{
+    subscribed: (req: IncomingMessage) => void;
+    unsubscribed: (req: IncomingMessage) => void;
+}>;
 
 type PubSubOptions = {
     eventBroker?: EventBroker;
@@ -290,7 +293,9 @@ const pubSub = ({
 
     const handleGet = async (namespaceName: string, keyName: string, req: IncomingMessage, res: ServerResponse) => {
         try {
-            const { authorizeSubscriber, setCookiesForSubscriber } = namespaces[namespaceName]!.auth;
+            const definition = namespaces[namespaceName]!;
+
+            const { authorizeSubscriber, setCookiesForSubscriber } = definition.auth;
 
             if (authorizeSubscriber && !(await authorizeSubscriber(keyName, req))) {
                 jsonError(Fault.Client, 'Unauthorized.', 401)(res);
@@ -307,6 +312,9 @@ const pubSub = ({
             res.setHeader('Connection', 'keep-alive');
 
             res.writeHead(200);
+
+            definition.emit('subscribed', req);
+
             // Flush
             res.write(`id:\nevent:${INITIAL_EVENT_NAME}\ndata:\nretry:${reconnectionTimeMilliseconds}\n\n`);
 
@@ -324,6 +332,7 @@ const pubSub = ({
                 res.end();
                 unsubscribe();
                 batch?.close();
+                definition.emit('unsubscribed', req);
             });
         } catch (err) {
             jsonError(Fault.Server, 'Internal server error.', 500)(res);
@@ -391,10 +400,16 @@ const pubSub = ({
 
     return {
         namespace: (namespaceName: string) => {
-            namespaces[namespaceName] ??= {
-                events: {},
-                auth: {},
-            };
+            namespaces[namespaceName] ??= Object.assign(
+                new EventEmitter() as TypedEmitter<{
+                    subscribed: (req: IncomingMessage) => void;
+                    unsubscribed: (req: IncomingMessage) => void;
+                }>,
+                {
+                    events: {},
+                    auth: {},
+                }
+            );
 
             return {
                 /**
