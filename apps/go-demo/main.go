@@ -32,7 +32,7 @@ func main() {
 
 	chats := pubSub.Namespace("chats")
 
-	auth := &streamlit.NamespaceAuth{}
+	auth := streamlit.CreateAuth()
 	auth.AuthorizeSubscriber(func(keyName string, r *http.Request) bool {
 		nickname := r.URL.Query().Get("nickname")
 

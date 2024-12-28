@@ -1,21 +1,3 @@
-// Concepts:
-//
-// Namespace:
-// A mechanism allowing for the logical separation between channel types
-// e.g. "Messages", "Notifications", "Changes"
-//
-// Key:
-// A specific channel in a namespace, holding any number of clients
-// e.g. "room1", "client-a6XydU", "document-2inUne"
-// Keys within a namespace are created on demand, as-needed
-//
-// Event:
-// A message with some data, sent from one client (or the server) to all
-// clients listening on a certain key
-// Every event has:
-// - An ID
-// - A type ("event")
-// - Data (always a string)
 package streamlit
 
 import (
@@ -92,18 +74,18 @@ func (errResponse *jsonError) send(w http.ResponseWriter) {
 	w.Write(bytes)
 }
 
-type ResponseWriterFlusher interface {
+type responseWriterFlusher interface {
 	http.ResponseWriter
 	http.Flusher
 }
 
 // A standardized format for server-sent events.
 type Event struct {
-	// A unique ID for the event
+	// A unique ID for the event.
 	Id string `json:"id"`
-	// The "type" of event
+	// The "type" of event.
 	Event string `json:"event"`
-	// Raw event data in string form
+	// Raw event data in string form.
 	Data string `json:"data"`
 }
 
@@ -132,6 +114,11 @@ type NamespaceAuth struct {
 	validateSubscriber func(keyName string, r *http.Request) bool
 }
 
+// Generate an auth client, which is reusable between multiple namespaces.
+func CreateAuth() *NamespaceAuth {
+	return &NamespaceAuth{}
+}
+
 // Set a cookie each time a client subscribes.
 func (auth *NamespaceAuth) SetSubscriberCookies(getCookiesToSetForSubscriber func(keyName string, r *http.Request) ([]*http.Cookie, bool)) {
 	auth.getCookiesToSetForSubscriber = getCookiesToSetForSubscriber
@@ -139,7 +126,7 @@ func (auth *NamespaceAuth) SetSubscriberCookies(getCookiesToSetForSubscriber fun
 
 // Validate a publisher via cookies, headers, or any other means.
 //
-// Returning false results in an "Unauthorized." error for the client.
+// Returning false results in an "Unauthorized" error for the client.
 func (auth *NamespaceAuth) AuthorizePublisher(validatePublisher func(keyName string, r *http.Request) bool) {
 	auth.validatePublisher = validatePublisher
 }
@@ -157,13 +144,12 @@ type namespaceEventDefinition struct {
 }
 
 // Prevent an event type from being forwarded to all clients subscribed in the keyspace, and instead handle the
-// event on the server
+// event on the server.
 func (eventDefinition *namespaceEventDefinition) Capture(captureEvent func(event *Event, r *http.Request)) {
 	eventDefinition.captureEvent = captureEvent
 }
 
-// Validate event data (e.g. preventing empty strings from being sent) with a validator function, passed as the second argument.
-// Passing nil skips event data validation.
+// Validate event data (e.g. preventing empty strings from being sent).
 //
 // The validator function can also optionally modify the event data by including a non-empty string as its second return value.
 // Pass an empty string ("") to skip enriching and maintain the original event data.
@@ -186,7 +172,7 @@ type namespaceDefinition struct {
 
 // Add to the list of events allowed to be published from the client-side.
 //
-// Only the event types you specify are allowed to be sent on the namespace, unless a type of "*" is specified
+// Only the event types you specify are allowed to be sent on the namespace by clients, unless a type of "*" is specified.
 func (definition namespaceDefinition) AllowEventType(eventType string) *namespaceEventDefinition {
 	eventDefinition, ok := definition.namespaceEventMap[eventType]
 	if !ok {
@@ -197,6 +183,8 @@ func (definition namespaceDefinition) AllowEventType(eventType string) *namespac
 	return eventDefinition
 }
 
+// Apply NamespaceAuth configuration to this namespace, allowing fine-grained control over which clients are allowed to
+// subscribe & publish to keys on the namespace.
 func (definition *namespaceDefinition) ConfigureAuth(auth *NamespaceAuth) {
 	definition.auth = auth
 }
@@ -212,6 +200,7 @@ type EventBrokerSubscriber interface {
 }
 
 // todo: RedisShardBroker
+
 // A generic interface for subscribing & publishing events.
 type EventBroker interface {
 	// To be called before the EventBroker is used.
@@ -220,7 +209,7 @@ type EventBroker interface {
 	//
 	// Called by PubSub when a POST request is received.
 	Publish(namespaceName, keyName string, event *Event)
-	// Create a subscriber for a given key in a namespace. One subscriber per client.
+	// Create a subscriber for a given key in a namespace. One subscriber is created per client.
 	//
 	// Called by PubSub when a GET request is received, and sends server-sent-events each time a message is received on the subscriber's channel.
 	Subscribe(namespaceName, keyName string) EventBrokerSubscriber
@@ -242,7 +231,7 @@ type inMemorySubscriber struct {
 	namespaceName string
 	keyName       string
 	channel       chan *Event
-	broker        *InMemoryEventBroker
+	broker        *inMemoryEventBroker
 }
 
 func (subscriber *inMemorySubscriber) Channel() <-chan *Event {
@@ -296,16 +285,16 @@ func (subscriber *inMemorySubscriber) Unsubscribe() {
 //	        <-chan *Event
 //	        <-chan *Event
 //	        <-chan *Event
-type InMemoryEventBroker struct {
+type inMemoryEventBroker struct {
 	// Namespace -> Key -> Client -> Empty Struct
 	clients *syncMap[string, *syncMap[string, *syncMap[chan *Event, struct{}]]]
 }
 
-func (broker *InMemoryEventBroker) Initialize() {
+func (broker *inMemoryEventBroker) Initialize() {
 	broker.clients = newSyncMap[string, *syncMap[string, *syncMap[chan *Event, struct{}]]]()
 }
 
-func (broker *InMemoryEventBroker) Publish(namespaceName, keyName string, event *Event) {
+func (broker *inMemoryEventBroker) Publish(namespaceName, keyName string, event *Event) {
 	// Do nothing if the namespace doesn't exist
 	broker.clients.mutex.RLock()
 	keyClientMap, ok := broker.clients.data[namespaceName]
@@ -335,7 +324,7 @@ func (broker *InMemoryEventBroker) Publish(namespaceName, keyName string, event 
 }
 
 // Adds a new entry to the in-memory list of clients under the given key in the namespace.
-func (broker *InMemoryEventBroker) Subscribe(namespaceName, keyName string) EventBrokerSubscriber {
+func (broker *inMemoryEventBroker) Subscribe(namespaceName, keyName string) EventBrokerSubscriber {
 	subscriber := &inMemorySubscriber{
 		broker:        broker,
 		namespaceName: namespaceName,
@@ -499,7 +488,7 @@ type PubSubConfig struct {
 // PubSub allows for bi-directional communication between the client & server, in addition to client-to-client communication.
 func NewPubSub(config PubSubConfig) *PubSub {
 	if config.EventBroker == nil {
-		config.EventBroker = &InMemoryEventBroker{}
+		config.EventBroker = &inMemoryEventBroker{}
 	}
 
 	if config.ReconnectionTime == 0 {
@@ -532,16 +521,16 @@ func (pubSub *PubSub) Namespace(namespaceName string) *namespaceDefinition {
 	return definition
 }
 
-// Publishes an event to all subscribers listening on a given key in a namespace.
+// Publishes an event from the server to all subscribers listening on a given key in a namespace.
 //
-// Skips event type & data validation. In other words, the server is allowed to send any type of event, even if it wasn't registered with RegisterEventType().
+// Skips event type & data validation. In other words, the server is allowed to send any type of event, even if it wasn't registered with AllowEventType().
 func (pubSub *PubSub) Publish(namespaceName, keyName string, event *Event) {
 	event.Id = randomId()
 
 	pubSub.eventBroker.Publish(namespaceName, keyName, event)
 }
 
-func (pubSub *PubSub) handleGet(namespaceName, keyName string, w ResponseWriterFlusher, r *http.Request) {
+func (pubSub *PubSub) handleGet(namespaceName, keyName string, w responseWriterFlusher, r *http.Request) {
 	authProvider := pubSub.namespaceMap[namespaceName].auth
 
 	if authProvider != nil {
@@ -749,7 +738,7 @@ func (pubSub *PubSub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		{
 			r.Body.Close()
 
-			wf, ok := w.(ResponseWriterFlusher)
+			wf, ok := w.(responseWriterFlusher)
 			if !ok {
 				newJsonError().client().message("Internal server error.").status(http.StatusBadRequest).send(w)
 				break

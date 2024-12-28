@@ -22,8 +22,22 @@ const INITIAL_EVENT_NAME = '__init__';
 // Sends a server-sent-event to the client
 export type EventBrokerClient = (event: EventInfo) => void;
 
+/**
+ * A generic interface for subscribing & publishing events.
+ */
 export type EventBroker = {
+    /**
+     * Create a subscriber for a given key in a namespace. One subscriber is created per client.
+     *
+     * Called by PubSub when a GET request is received, and sends server-sent-events each time a message is received
+     * via the `client()` callback.
+     */
     subscribe: (namespaceName: string, keyName: string, client: EventBrokerClient) => Awaitable<() => Awaitable<void>>;
+    /**
+     * Publish an event to all subscribers listening on a given key in a namespace.
+     *
+     * Called by PubSub when a POST request is received.
+     */
     publish: (namespaceName: string, keyName: string, event: EventInfo) => Awaitable<void>;
 };
 
@@ -112,6 +126,9 @@ type RedisEventBrokerOptions = {
     options: RedisClientOptions;
 };
 
+/**
+ * A light wrapper around Redis pub-sub, implementing {@link EventBroker} for support with SSE PubSub.
+ */
 export const redisEventBroker = ({
     getChannelName = (namespaceName, keyName) => `${namespaceName}_${keyName}`,
     options,
@@ -200,15 +217,37 @@ const eventBatch = (
     };
 };
 
-type NamespaceAuthConfig = {
+export type NamespaceAuthConfig = {
+    /**
+     * Set a cookie each time a client subscribes.
+     */
     setCookiesForSubscriber?: (keyName: string, req: IncomingMessage) => Awaitable<string[]>;
+    /**
+     * Validate a publisher via cookies, headers, or any other means.
+     *
+     * Returning `false` results in an "Unauthorized" error for the client.
+     */
     authorizePublisher?: (keyName: string, req: IncomingMessage) => Awaitable<boolean>;
+    /**
+     * Validate a subscriber via cookies, headers, or any other means.
+     *
+     * Returning `false` results in an "Unauthorized" error for the client.
+     */
     authorizeSubscriber?: (keyName: string, req: IncomingMessage) => Awaitable<boolean>;
 };
 
 type EventDefinition = {
+    /**
+     * Validate event data (e.g. preventing empty strings from being sent).
+     */
     validateData?: (eventData: string) => boolean;
+    /**
+     * Modify the event data before it is either forwarded to other clients, or captured (if `captureEvent()` is present).
+     */
     enrichData?: (eventData: string, req: IncomingMessage) => string;
+    /**
+     * Prevent an event type from being forwarded to all clients subscribed in the keyspace, and instead handle the event on the server.
+     */
     captureEvent?: (event: EventInfo, req: IncomingMessage) => Awaitable<void>;
 };
 
@@ -358,14 +397,28 @@ const pubSub = ({
             };
 
             return {
+                /**
+                 * Add to the list of events allowed to be published from the client-side.
+                 *
+                 * Only the event types you specify are allowed to be sent on the namespace by clients, unless a type of **\*** is specified.
+                 */
                 allowEventType: (eventName: string, options: EventDefinition = {}) => {
                     namespaces[namespaceName]!.events[eventName] = options;
                 },
+                /**
+                 * Apply {@link NamespaceAuthConfig} to this namespace, allowing fine-grained control over which clients are allowed to
+                 * subscribe & publish to keys on the namespace.
+                 */
                 configureAuth: (auth: NamespaceAuthConfig) => {
                     namespaces[namespaceName]!.auth = auth;
                 },
             };
         },
+        /**
+         * Publishes an event from the server to all subscribers listening on a given key in a namespace.
+         *
+         * Skips event type & data validation. In other words, the server is allowed to send any type of event, even if it wasn't registered with `allowEventType()`.
+         */
         publish: (namespaceName: string, keyName: string, event: Omit<EventInfo, 'id'>) =>
             eventBroker.publish(namespaceName, keyName, {
                 ...event,
